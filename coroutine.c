@@ -18,7 +18,9 @@
 struct coroutine;
 // 协程调度器
 struct schedule {
+	// 协程的公共栈
 	char stack[STACK_SIZE];
+	// 主上下文，不是协程的
 	ucontext_t main;
 	// 已使用的个数
 	int nco;
@@ -39,8 +41,9 @@ struct coroutine {
 	ucontext_t ctx;
 	// 所属调度器
 	struct schedule * sch;
-	// 
+	// 栈最大大小
 	ptrdiff_t cap;
+	// 栈已用大小
 	ptrdiff_t size;
 	// 协程状态
 	int status;
@@ -158,7 +161,7 @@ coroutine_resume(struct schedule * S, int id) {
 	case COROUTINE_READY:
 		// 保存当前执行的上下文到ctx，在makecontext中会覆盖某些字段
 		getcontext(&C->ctx);
-		// 设置协程执行时的栈顶和栈大小
+		// 设置协程执行时的栈信息，真正的esp在makecontext里会修改成ss_sp+ss_size-一定的大小（用于存储额外数据的）
 		C->ctx.uc_stack.ss_sp = S->stack;
 		C->ctx.uc_stack.ss_size = STACK_SIZE;
 		// 记录下一个协程，即执行完执行他
@@ -191,13 +194,15 @@ _save_stack(struct coroutine *C, char *top) {
 	// dummy用于计算出当前的esp，即栈顶地址
 	char dummy = 0;
 	assert(top - &dummy <= STACK_SIZE);
-	// top-&dummy算出栈还有多少空间
+	// top-&dummy算出协程当前的栈上下文有多大，如果比当前的容量大，则需要扩容
 	if (C->cap < top - &dummy) {
 		free(C->stack);
 		C->cap = top-&dummy;
 		C->stack = malloc(C->cap);
 	}
+	// 记录当前的栈大小
 	C->size = top - &dummy;
+	// 复制公共栈的数据到私有栈
 	memcpy(C->stack, &dummy, C->size);
 }
 // 协程主动让出执行权，切换到main
